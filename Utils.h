@@ -14,12 +14,15 @@
 #include <algorithm>
 #include <unordered_map>
 #include <functional>
+#include <cstddef>
 
 class Utils {
 public:
 
+#define SLOW_DISTANCE 0
+#if SLOW_DISTANCE
     // helper function which just gets us our distance so we don't have to write it all over.
-    static float euclideanDistance(float *a, float *b, int FIELD_LENGTH) {
+    static inline float euclideanDistance(float *a, float *b, int FIELD_LENGTH) {
         float sum = 0.0f;
         for (int i = 0; i < FIELD_LENGTH; i++) {
             float diff = a[i] - b[i];
@@ -28,6 +31,33 @@ public:
         }
         return sqrt(sum);
     }
+#else
+
+    // same as above, but super optimized.
+    // we use restrict *'s and we use simd to vectorize this operation and do it FAST
+    static inline float euclideanDistance(const float* __restrict a, const float* __restrict b, const int n) {
+        float sum = 0.0f;
+        const int limit = n & ~3;  // for 4-wide unroll. gets us the largest multiple of 4 <= N.
+
+        // we are going to do a reduction, and we have manually unrolled the loop here so that we do less operations.
+        // vectorized operations
+        #pragma omp simd reduction(+:sum)
+        for (int i = 0; i <= limit; i += 4) {
+            float d0 = a[i] - b[i];
+            float d1 = a[i+1] - b[i+1];
+            float d2 = a[i+2] - b[i+2];
+            float d3 = a[i+3] - b[i+3];
+            sum += d0*d0 + d1*d1 + d2*d2 + d3*d3;
+        }
+        // get the remaining values.
+        for (int i = limit + 4; i < n; ++i) {
+            float d = a[i] - b[i];
+            sum += d*d;
+        }
+
+        return sqrt(sum);
+    }
+#endif
 
     static void waitForEnter() {
         std::cout << "\nPress Enter to continue...";
@@ -68,7 +98,6 @@ public:
 
         // Distribute each class's points across folds
         for (auto& entry : classBuckets) {
-            int cls = entry.first;
             auto& points = entry.second;
 
             shuffle(points.begin(), points.end(), rng);

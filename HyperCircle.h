@@ -32,6 +32,7 @@ public:
     int classification;
 
     int numPoints;
+    HyperCircle();
     HyperCircle(float rad, float *center, int cls);
 
     // finds the nearest neighbor to each HC

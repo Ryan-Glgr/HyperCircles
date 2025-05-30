@@ -1,5 +1,0 @@
-ninja_dyndep_version = 1.0
-build CMakeFiles/HyperSpheres.dir/main.cpp.o: dyndep
-
-build CMakeFiles/HyperSpheres.dir/HyperCircle.cpp.o: dyndep
-
