@@ -76,7 +76,7 @@ vector<Point> readFile(const string &fileName) {
 
         // Handle class label
         string label = tokens.back();
-        if (CLASS_MAP.find(label) == CLASS_MAP.end()) {
+        if (!CLASS_MAP.contains(label)) {
             CLASS_MAP[label] = NUM_CLASSES++;
         }
         int cls = CLASS_MAP[label];
@@ -95,7 +95,10 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &testData) {
 
     for (int p = 0; p < testData.size(); p++) {
         const auto &point = testData[p];
-        int predictedClass = HyperCircle::classifyPoint(circles, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+        const int predictedClass = HyperCircle::classifyPoint(circles, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+
+        if (predictedClass == -1)
+            continue;
 
         // increment our count of predicted class for this point's real class. if they're same, that's good obviously.
         confusionMatrix[point.classification][predictedClass]++;
@@ -250,6 +253,9 @@ int main() {
             }
             case 6: {
                 running = false;
+                break;
+            }
+            default: {
                 break;
             }
         }
