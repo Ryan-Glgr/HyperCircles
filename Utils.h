@@ -13,7 +13,7 @@
 #include <random>
 #include <algorithm>
 #include <unordered_map>
-
+#include <functional>
 
 class Utils {
 public:
@@ -67,7 +67,10 @@ public:
         std::vector<std::vector<Point>> folds(k);
 
         // Distribute each class's points across folds
-        for (auto& [cls, points] : classBuckets) {
+        for (auto& entry : classBuckets) {
+            int cls = entry.first;
+            auto& points = entry.second;
+
             shuffle(points.begin(), points.end(), rng);
             for (int i = 0; i < points.size(); ++i) {
                 folds[i % k].push_back(points[i]);
