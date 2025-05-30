@@ -8,13 +8,14 @@
 #include "Utils.h"
 #include <map>
 
-#define PRINTING 1
 using namespace std;
 
 // used so that we can easily get the number of classes, names and whatnot
+// very similar to github.com/austinsnyd3r/hyperblocks
 map<string, int> CLASS_MAP;
 int NUM_CLASSES = 0;
 int Point::numAttributes = 0;
+bool PRINTING = true;
 
 vector<Point> readFile(const string &fileName) {
 
@@ -99,15 +100,15 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &testData) {
         confusionMatrix[point.classification][predictedClass]++;
     }
 
-#if PRINTING
-    cout << "CONFUSION MATRIX:" << endl;
-    for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
-        for (int row = 0; row < CLASS_MAP.size(); ++row) {
-            cout << confusionMatrix[cls][row] << "\t|| ";
+    if (PRINTING) {
+        cout << "CONFUSION MATRIX:" << endl;
+        for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
+            for (int row = 0; row < CLASS_MAP.size(); ++row) {
+                cout << confusionMatrix[cls][row] << "\t|| ";
+            }
+            cout << endl;
         }
-        cout << endl;
     }
-#endif
 
     // count how many we got right
     int totalRight = 0;
@@ -117,6 +118,48 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &testData) {
 
     // return our average
     return (float) totalRight / (float) testData.size();
+}
+
+// return is accuracy, then average circle count
+pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
+
+    // first we use our util function to split up all our data into different training and testing folds.
+    vector<vector<Point>> kBuckets = Utils::stratifiedKFolds(numFolds, allData);
+
+    // now, we run our loop numFolds times. gathering info each time.
+    float totalAcc = 0.0f;
+    int totalCircles = 0;
+    for (int fold = 0; fold < numFolds; ++fold) {
+
+        // setting up train and test split for this iteration
+        vector<Point> trainingData;
+        vector<Point> testData;
+        for (int trainFold = 0; trainFold < numFolds; ++trainFold) {
+            if (trainFold == fold) {
+                testData = kBuckets[fold];
+            }
+            else
+                trainingData.insert(trainingData.end(), kBuckets[trainFold].begin(), kBuckets[trainFold].end());
+        }
+
+        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData);
+
+        // get our accuracy on the test portion.
+        totalAcc += testAccuracy(circles, testData);
+
+        // add our count so we can track how many circles we needed.
+        totalCircles += circles.size();
+    }
+
+    float avgAcc = totalAcc / (float) numFolds;
+    float avgCircles = totalCircles / (float) numFolds;
+
+    if (PRINTING) {
+        printf("%d FOLD CROSS VALIDATION ACCURACY: %.3f", numFolds, avgAcc);
+        printf("AVERAGE NUMBER OF HYPERCIRCLES NEEDED:\t%.2f", avgCircles);
+    }
+
+    return {avgAcc, avgCircles};
 }
 
 void cleanupPoints(vector<Point> &data) {
@@ -146,6 +189,12 @@ int main() {
             case 1: {
                 // get our user input for the filename.
                 cout << "Enter training data filename: " << endl;
+#ifdef _WIN32
+                system("dir datasets/");
+                #else
+                system("ls datasets/");
+#endif
+
                 string fileName;
                 getline(cin >> ws, fileName); // eat leading whitespace
 
@@ -186,6 +235,16 @@ int main() {
             }
             // k fold validation
             case 5: {
+
+                int numFolds;
+                cout << "How many folds of cross validation (K value) ?" << endl;
+                cin >> numFolds;
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+                kFoldValidation(numFolds, trainData);
+
+                Utils::waitForEnter();
                 break;
             }
             case 6: {

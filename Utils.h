@@ -10,6 +10,9 @@
 #include <limits>
 #include <cstdlib>
 #include "Point.h"
+#include <random>
+#include <algorithm>
+#include <unordered_map>
 
 
 class Utils {
@@ -47,6 +50,31 @@ public:
         std::cout << "5. K Fold Cross Validation.\n\n";
         std::cout << std::endl;
         std::cout << "6. Quit\n\n";
+    }
+
+    // Stratified k-fold split
+    static std::vector<std::vector<Point>> stratifiedKFolds(int k, std::vector<Point> &data, int seed = 42) {
+        // Map from class ID to all points of that class
+        std::unordered_map<int, std::vector<Point>> classBuckets;
+        for (const auto& point : data) {
+            classBuckets[point.classification].push_back(point);
+        }
+
+        // Set up RNG
+        std::mt19937 rng(seed);
+
+        // Create k empty folds
+        std::vector<std::vector<Point>> folds(k);
+
+        // Distribute each class's points across folds
+        for (auto& [cls, points] : classBuckets) {
+            shuffle(points.begin(), points.end(), rng);
+            for (int i = 0; i < points.size(); ++i) {
+                folds[i % k].push_back(points[i]);
+            }
+        }
+
+        return folds;
     }
 
 };
