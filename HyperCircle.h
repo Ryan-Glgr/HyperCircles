@@ -11,8 +11,13 @@
 #include <algorithm>
 #include <functional>
 #include <set>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include <map>
+#include <queue>
+#include <utility>
+
 
 #include "Point.h"
 
