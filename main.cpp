@@ -142,16 +142,21 @@ static vector<HyperCircle> loadCircles(const string& filename) {
 float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
 
     vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
-
-    for (int p = 0; p < testData.size(); p++) {
+    int unclassifiedCount = 0;
+    // Use a reduction on unclassifiedCount, and atomic updates for confusionMatrix entries.
+    #pragma omp parallel for reduction(+:unclassifiedCount)
+    for (int p = 0; p < testData.size(); ++p) {
         const auto &point = testData[p];
-        const int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
 
         if (predictedClass == -1) {
-            HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::REGULAR_KNN, NUM_CLASSES);
+            // re‐classify with KNN and assign back to predictedClass
+            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN,NUM_CLASSES);
+            unclassifiedCount++;
         }
 
-        // increment our count of predicted class for this point's real class. if they're same, that's good obviously.
+        // Atomic increment of the appropriate cell in confusionMatrix
+        #pragma omp atomic
         confusionMatrix[point.classification][predictedClass]++;
     }
 
@@ -163,6 +168,7 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
             }
             cout << endl;
         }
+        cout << "UNCLASSIFIED BY THE HCs:\t" << unclassifiedCount << endl << endl;
     }
 
     // count how many we got right

@@ -1,4 +1,4 @@
 datasetsVisualized
 *.py
 cmake-build-debug
-
+datasets/*mnist*

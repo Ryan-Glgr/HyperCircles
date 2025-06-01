@@ -325,7 +325,7 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
         }
 
         case REGULAR_KNN: {
-            prediction = regularKNN(train, dataToCheck, 5, numClasses);
+            prediction = regularKNN(train, dataToCheck, 3, numClasses);
             break;
         }
 
