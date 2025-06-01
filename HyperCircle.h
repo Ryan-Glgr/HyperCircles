@@ -47,16 +47,21 @@ public:
     // wrapper function which makes all our circles by finding neighbors, then runs the merging algorithm and returns us our circles list
     static std::vector<HyperCircle> generateHyperCircles(std::vector<Point> &data);
 
+    static void removeUselessCircles(std::vector<HyperCircle> &circles, std::vector<Point> &data);
+
     // helper function which checks if a given HC has a point inside it
     bool insideCircle(float *dataToCheck);
 
-    static int classifyPoint(std::vector<HyperCircle> &circles, float *dataToCheck, int classificationMode, int numClasses);
+    static int classifyPoint(std::vector<HyperCircle> &circles, std::vector<Point> &train, float *dataToCheck, int classificationMode, int numClasses);
     // used for the different classification types
     enum {
         SIMPLE_MAJORITY = 0,
         DENSITY_VOTING = 1,
-        TOTAL_POINT_COUNT = 2
+        TOTAL_POINT_COUNT = 2,
+        REGULAR_KNN = 3
     };
+
+    static int regularKNN(std::vector<Point> &data, float *point, int k, int numClasses);
 
 };
 

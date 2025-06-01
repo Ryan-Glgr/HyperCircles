@@ -2,6 +2,13 @@
 #include "Utils.h"
 using namespace std;
 
+// parameters we can play with.
+#define MIN_RADIUS 0.0f
+#define SIMPLE_VOTE 0
+#define COUNT_VOTE 1
+#define DENSITY_VOTE 0
+#define DISTANCE_VOTE 0
+
 HyperCircle::HyperCircle() {
     radius = 0.0f;
     centerPoint = nullptr;
@@ -30,7 +37,7 @@ void HyperCircle::findNearestNeighbor(vector<Point> &dataSet) {
             continue;
         }
 
-        float newDist = Utils::euclideanDistance(p.location, centerPoint, Point::numAttributes);
+        float newDist = Utils::distance(p.location, centerPoint, Point::numAttributes);
 
         // using <= so that if we had a TIE, we would update classification. this might help us catch errors
         if (newDist < minDist) {
@@ -53,10 +60,9 @@ void HyperCircle::findNearestNeighbor(vector<Point> &dataSet) {
     }
 }
 
-// takes in the entire dataset, split up by class
+// takes in the entire dataset
 vector<HyperCircle> HyperCircle::createCircles(vector<Point> &dataset) {
 
-    // make a circle out of each point
     vector<HyperCircle> circles(dataset.size());
 
     // Parallel HC creation.
@@ -68,10 +74,12 @@ vector<HyperCircle> HyperCircle::createCircles(vector<Point> &dataset) {
 
     // update each circle's radius to our nearest neighbor.
     #pragma omp parallel for
-    for (int c = 0; c < circles.size(); c++) {
-        auto &circle = circles[c];
+    for (auto & circle : circles) {
         circle.findNearestNeighbor(dataset);
     }
+
+    // delete entirely all those circles which had a radius of 0.0f. meaning their nearest neighbor is wrong class. 
+    circles.erase(remove_if(circles.begin(), circles.end(),[](const HyperCircle& c) { return c.radius == 0.0f; }),circles.end());
 
     return circles;
 }
@@ -97,10 +105,9 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
         {
             // our own local copy of the circles pairs
             vector<pair<float,int>> local;
-            local.reserve(data.size() / omp_get_num_threads());
+            local.reserve(circles.size() / omp_get_num_threads());
 
-            // use nowait so that they don't bother synchronizing
-            #pragma omp for nowait
+            #pragma omp for
             for (int j = idx + 1; j < circles.size(); ++j) {
 
                 // skip dead or wrong-class circles
@@ -108,7 +115,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
                     continue;
 
                 // get our distance between our two circles. push that plus smaller guy radius.
-                local.emplace_back(Utils::euclideanDistance(c.centerPoint,circles[j].centerPoint, Point::numAttributes) + circles[j].radius, j);
+                local.emplace_back(Utils::distance(c.centerPoint,circles[j].centerPoint, Point::numAttributes) + circles[j].radius, j);
             }
 
             // add all our distances
@@ -136,23 +143,23 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
                 continue;
             }
 
-            volatile int canMerge = 1; // shared flag
+            atomic_int canMerge{1}; // shared flag
             #pragma omp parallel for schedule(static) shared(canMerge)
-            for (int p = 0; p < data.size(); ++p) {
+            for (auto pt : data) {
 
                 if (!canMerge)
                     continue;   // early-out after failure
 
-                const Point& pt = data[p];
                 if (pt.classification == c.classification)
                     continue;
 
-                if (Utils::euclideanDistance(pt.location,c.centerPoint, Point::numAttributes) <= newR2) {
-
-                    #pragma omp atomic write
-                    canMerge = 0;
-
+                if (Utils::distance(pt.location,c.centerPoint, Point::numAttributes) <= newR2) {
+                    canMerge.store(0, memory_order_relaxed);
+                    #ifdef _OPENMP
                     #pragma omp cancel for
+                    #else
+                    break;
+                    #endif
                 }
                 #pragma omp cancellation point for
             }
@@ -175,7 +182,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
 }
 
 bool HyperCircle::insideCircle(float *dataToCheck) {
-    return (Utils::euclideanDistance(centerPoint, dataToCheck, Point::numAttributes) <= radius);
+    return (Utils::distance(centerPoint, dataToCheck, Point::numAttributes) <= radius);
 }
 
 // function which makes us a list of circles given some pre processed data
@@ -184,9 +191,12 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data) {
     // generate our initial list of circles
     vector<HyperCircle> circles = createCircles(data);
 
+    cout << "Circles created...\nBeginning Merging." << endl;
+
     // merge our circles so that we can get larger circles
     mergeCircles(circles, data);
 
+    cout << "Circles merged...\nRemoving Circles" << endl;
 
     for (auto &circle : circles) {
 
@@ -195,9 +205,8 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data) {
         // do a reduction to efficiently compute the size of the circle in terms of point count
         // we do the reduction because we are computing a ton of euclidean distances in the inside function.
         #pragma omp parallel for reduction(+ : insideCount)
-        for (int p = 0; p < data.size(); ++p) {
+        for (auto & point : data) {
 
-            auto &point = data[p];
             // if this point is inside, increment numPoints
             if (circle.insideCircle(point.location)) {
                 insideCount++;
@@ -206,10 +215,60 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data) {
         // update the value now that the for loop is over
         circle.numPoints = insideCount;
     }
+
+    removeUselessCircles(circles, data);
+
+    cout << "Useless Circles Removed...\nWe generated:\t" << circles.size() << " circles." << endl;
+
     return circles;
 }
 
-int HyperCircle::classifyPoint(vector<HyperCircle> &circles, float *dataToCheck, int classificationMode, int numClasses) {
+void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Point> &data) {
+    // vector to track how many points each circle had
+    vector<int> circlePointCounts(circles.size(), 0);
+
+
+    #pragma omp parallel
+    {
+        vector<int> localCounts(circles.size(), 0);   // private
+
+        // take every point, and find it's biggest circle it fits inside of by radius
+        #pragma omp for schedule(static)
+        for (auto p : data) {
+
+            // get our biggest count, track it, get our point
+            int biggestCount = 0;
+            int bestCircleIndex = -1;
+
+            // find the best circle
+            for (int circ = 0; circ < circles.size(); circ++) {
+                auto &c = circles[circ];
+                if (c.numPoints > biggestCount && c.insideCircle(p.location)) {
+                    biggestCount = c.numPoints;
+                    bestCircleIndex = circ;
+                }
+            }
+            if (bestCircleIndex != -1) {
+                localCounts[bestCircleIndex]++;
+            }
+        }
+
+        // merge private tallies into the shared array
+        #pragma omp critical
+        for (int i = 0; i < circlePointCounts.size(); ++i)
+            circlePointCounts[i] += localCounts[i];
+
+    }// end pragma
+
+    // Erase circles that had no points assigned
+    auto newEnd = remove_if(circles.begin(), circles.end(),
+        [&, i = 0](const HyperCircle &c) mutable {
+            return circlePointCounts[i++] == 0;
+        });
+    circles.erase(newEnd, circles.end());
+}
+
+int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode, int numClasses) {
 
     // here we use our different classification options.
     // first option is to just take whichever class we find our point in the most.
@@ -220,17 +279,40 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, float *dataToCheck,
 
         case SIMPLE_MAJORITY: {
 
-            int *votes = new int[numClasses]();
+            float *votes = new float[numClasses]();
 
             // for each HC, if the point is inside, we simply up the count.
             for (int i = 0; i < circles.size(); i++) {
                 if (circles[i].insideCircle(dataToCheck)) {
-                    votes[circles[i].classification]++;
+
+                    // regular vote, we just use the count of circles we're inside by class
+                    #if SIMPLE_VOTE
+                    votes[circles[i].classification] += 1.0f;
+                    #endif
+
+                    // vote with the amount of points in the circle.
+                    #if COUNT_VOTE
+                    votes[circles[i].classification] += circles[i].numPoints;
+                    #endif
+
+                    #if DENSITY_VOTE
+                    // simple count/radius
+                    float r = max(circles[i].radius, 1e-6f);
+                    float weight = circles[i].numPoints / r;
+                    votes[circles[i].classification] += weight;
+                    #endif
+
+                    #if DISTANCE_VOTE
+                    // count / distance from the center
+                    float dist = Utils::distance(dataToCheck, circles[i].centerPoint, Point::numAttributes);
+                    float weight = circles[i].numPoints / (dist + 1e-4f);
+                    votes[circles[i].classification] += weight;
+                    #endif
                 }
             }
 
             // start maxVotes at 0. that way if no votes are cast, we know that we have to classify with the fallback mechanisms
-            int maxVotes = 0;
+            float maxVotes = 0.0f;
             for (int cls = 0; cls < numClasses; ++cls) {
                 if (votes[cls] > maxVotes) {
                     maxVotes = votes[cls];
@@ -239,13 +321,40 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, float *dataToCheck,
             }
 
             delete[] votes;
+            break;
         }
 
+        case REGULAR_KNN: {
+            prediction = regularKNN(train, dataToCheck, 5, numClasses);
+            break;
+        }
 
     }
-
 
     // fallback mechanism
     return prediction;
 }
 
+int HyperCircle::regularKNN(vector<Point> &data, float *point, int k, int numClasses) {
+
+    vector<pair<float, int>> distances(data.size());
+
+    #pragma omp parallel for
+    for (int dp = 0; dp < data.size(); ++dp) {
+        distances[dp] = {Utils::distance(data[dp].location, point, Point::numAttributes), data[dp].classification};
+    }
+
+    // sort up to kth element. clamping if needed
+    if (k > distances.size())
+        k = distances.size();
+
+    nth_element(distances.begin(),distances.begin() + k, distances.end(),[](const auto& a, const auto& b){ return a.first < b.first; });
+
+    // vote. weighting by the 1/distance.
+    vector<float> votes(numClasses, 0.0f);
+    for (int i = 0; i < k; ++i)
+        votes[distances[i].second] += (1 / distances[i].first);
+
+    // return our best class by finding max element
+    return distance(votes.begin(),max_element(votes.begin(), votes.end()));
+}

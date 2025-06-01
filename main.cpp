@@ -88,17 +88,68 @@ vector<Point> readFile(const string &fileName) {
     return data;
 }
 
+// quick GPT made functions to load and save circles to and from a file.
+static void saveCircles(const vector<HyperCircle>& circles, const string& filename) {
+    ofstream out(filename, ios::binary);
+    int32_t n = static_cast<int32_t>(circles.size());
+    out.write(reinterpret_cast<const char*>(&n), sizeof(n));
+
+    for (const auto& hc : circles) {
+        // radius
+        out.write(reinterpret_cast<const char*>(&hc.radius), sizeof(hc.radius));
+        // classification
+        out.write(reinterpret_cast<const char*>(&hc.classification), sizeof(hc.classification));
+        // numPoints
+        out.write(reinterpret_cast<const char*>(&hc.numPoints), sizeof(hc.numPoints));
+        // centerPoint coordinates (Point::numAttributes floats)
+        for (int d = 0; d < Point::numAttributes; ++d) {
+            out.write(reinterpret_cast<const char*>(&hc.centerPoint[d]), sizeof(float));
+        }
+    }
+    out.close();
+}
+
+static vector<HyperCircle> loadCircles(const string& filename) {
+    ifstream in(filename, ios::binary);
+    int32_t n;
+    in.read(reinterpret_cast<char*>(&n), sizeof(n));
+
+    vector<HyperCircle> circles;
+    circles.reserve(n);
+    for (int32_t i = 0; i < n; ++i) {
+        float   radius;
+        int32_t cls;
+        int32_t count;
+        in.read(reinterpret_cast<char*>(&radius),    sizeof(radius));
+        in.read(reinterpret_cast<char*>(&cls),       sizeof(cls));
+        in.read(reinterpret_cast<char*>(&count),     sizeof(count));
+
+        // allocate and read centerPoint array
+        float* center = new float[Point::numAttributes];
+        for (int d = 0; d < Point::numAttributes; ++d) {
+            in.read(reinterpret_cast<char*>(&center[d]), sizeof(float));
+        }
+
+        HyperCircle hc(radius, center, cls);
+        hc.numPoints = count;
+        circles.push_back(hc);
+    }
+    in.close();
+    return circles;
+}
+
 // tests the accuracy with our test set.
-float testAccuracy(vector<HyperCircle> &circles, vector<Point> &testData) {
+float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
 
     vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
 
     for (int p = 0; p < testData.size(); p++) {
         const auto &point = testData[p];
-        const int predictedClass = HyperCircle::classifyPoint(circles, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+        const int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
 
-        if (predictedClass == -1)
-            continue;
+        if (predictedClass == -1) {
+            HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::REGULAR_KNN, NUM_CLASSES);
+        }
 
         // increment our count of predicted class for this point's real class. if they're same, that's good obviously.
         confusionMatrix[point.classification][predictedClass]++;
@@ -149,7 +200,7 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
         vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData);
 
         // get our accuracy on the test portion.
-        totalAcc += testAccuracy(circles, testData);
+        totalAcc += testAccuracy(circles, trainingData, testData);
 
         // add our count so we can track how many circles we needed.
         totalCircles += circles.size();
@@ -217,6 +268,13 @@ int main() {
             case 2: {
                 cout << "Enter testing data filename: " << endl;
                 string fileName;
+
+#ifdef _WIN32
+                system("dir datasets/");
+#else
+                system("ls datasets/");
+#endif
+
                 getline(cin, fileName);
                 testData = readFile(fileName);
 
@@ -232,7 +290,7 @@ int main() {
             }
             // tests against a given test set
             case 4: {
-                float acc = testAccuracy(circles, testData);
+                float acc = testAccuracy(circles, trainData,testData);
                 cout << "Accuracy: " << acc << endl;
                 Utils::waitForEnter();
                 break;
@@ -251,7 +309,32 @@ int main() {
                 Utils::waitForEnter();
                 break;
             }
+
             case 6: {
+                cout << "Enter HC's file name to save to: " << endl;
+                string fileName;
+                getline(cin, fileName);
+
+                saveCircles(circles, fileName);
+
+                Utils::waitForEnter();
+                break;
+            }
+
+            case 7: {
+                cout << "Enter HC's file name to load from: " << endl;
+                string fileName;
+                getline(cin, fileName);
+
+                circles = loadCircles(fileName);
+                cout << "Loaded: " << circles.size() << " points in that file." << endl;
+
+                Utils::waitForEnter();
+                break;
+            }
+
+
+            case 8: {
                 running = false;
                 break;
             }
