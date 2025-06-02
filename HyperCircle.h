@@ -32,6 +32,9 @@ public:
     int classification;
 
     int numPoints;
+
+    static std::vector<int> numCirclesPerClass;
+
     HyperCircle();
     HyperCircle(float rad, float *center, int cls);
 
@@ -45,20 +48,29 @@ public:
     static void mergeCircles(std::vector<HyperCircle> &circles, std::vector<Point> &data);
 
     // wrapper function which makes all our circles by finding neighbors, then runs the merging algorithm and returns us our circles list
-    static std::vector<HyperCircle> generateHyperCircles(std::vector<Point> &data);
+    static std::vector<HyperCircle> generateHyperCircles(std::vector<Point> &data, int numClasses);
 
     static void removeUselessCircles(std::vector<HyperCircle> &circles, std::vector<Point> &data);
 
     // helper function which checks if a given HC has a point inside it
     bool insideCircle(float *dataToCheck);
 
-    static int classifyPoint(std::vector<HyperCircle> &circles, std::vector<Point> &train, float *dataToCheck, int classificationMode, int numClasses);
-    // used for the different classification types
+    // classification mode determines whether we use HC's or KNN (or whatever other fallback). then we use the sub mode in the switch to determine voting style or which particular fallback
+    static int classifyPoint(std::vector<HyperCircle> &circles, std::vector<Point> &train, float *dataToCheck, int classificationMode, int subMode,  int numClasses);
+
+    // all the different ways we can use the HC's for voting on which class
     enum {
         SIMPLE_MAJORITY = 0,
-        DENSITY_VOTING = 1,
-        TOTAL_POINT_COUNT = 2,
-        REGULAR_KNN = 3
+        COUNT_VOTE = 1,
+        DENSITY_VOTE = 2,
+        DISTANCE_VOTE = 3,
+        PER_CLASS_VOTE = 4
+    };
+
+    // used for the different fallback types
+    enum {
+        USE_CIRCLES = 0, // normal version, where we are not using fallback.
+        REGULAR_KNN = 1
     };
 
     static int regularKNN(std::vector<Point> &data, float *point, int k, int numClasses);

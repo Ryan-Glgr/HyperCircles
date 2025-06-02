@@ -90,8 +90,9 @@ public:
         std::cout << "5. K Fold Cross Validation.\n\n";
         std::cout << "6. Save HC's to a file\n";
         std::cout << "7. Load HC's from a file\n";
+        std::cout << "8. Find Best HC voting on test data.\n";
         std::cout << std::endl;
-        std::cout << "8. Exit\n";
+        std::cout << "-1. Exit\n";
     }
 
     // Stratified k-fold split

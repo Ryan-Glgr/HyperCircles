@@ -4,10 +4,8 @@ using namespace std;
 
 // parameters we can play with.
 #define MIN_RADIUS 0.0f
-#define SIMPLE_VOTE 0
-#define COUNT_VOTE 1
-#define DENSITY_VOTE 0
-#define DISTANCE_VOTE 0
+
+vector<int> HyperCircle::numCirclesPerClass;
 
 HyperCircle::HyperCircle() {
     radius = 0.0f;
@@ -164,7 +162,8 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
                 #pragma omp cancellation point for
             }
 
-            if (canMerge) {
+            // if we can merge, update radius, and mark that this circle is toast.
+            if (canMerge != 0) {
                 c.radius = newR2;
                 mergable.push_back(circleID);   // remember the real ID
             } else
@@ -177,7 +176,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
 
     }
 
-    // single compaction pass – remove all null centerpoints HC's
+    // single compaction pass. remove all null centerpoints HC's
     circles.erase(remove_if(circles.begin(), circles.end(),[](const HyperCircle& hc){return hc.centerPoint == nullptr; }), circles.end());
 }
 
@@ -186,7 +185,7 @@ bool HyperCircle::insideCircle(float *dataToCheck) {
 }
 
 // function which makes us a list of circles given some pre processed data
-vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data) {
+vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int numClasses) {
 
     // generate our initial list of circles
     vector<HyperCircle> circles = createCircles(data);
@@ -216,9 +215,15 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data) {
         circle.numPoints = insideCount;
     }
 
-    removeUselessCircles(circles, data);
+    // remove circles which don't uniquely classify any points
+    // removeUselessCircles(circles, data);
 
     cout << "Useless Circles Removed...\nWe generated:\t" << circles.size() << " circles." << endl;
+
+    // get our count of how many circles per class
+    numCirclesPerClass.resize(numClasses);
+    for (auto &circle : circles)
+        numCirclesPerClass[circle.classification]++;
 
     return circles;
 }
@@ -268,7 +273,7 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
     circles.erase(newEnd, circles.end());
 }
 
-int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode, int numClasses) {
+int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode,int subMode,  int numClasses) {
 
     // here we use our different classification options.
     // first option is to just take whichever class we find our point in the most.
@@ -277,39 +282,59 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
     int prediction = -1;
     switch (classificationMode) {
 
-        case SIMPLE_MAJORITY: {
+        case USE_CIRCLES: {
 
-            float *votes = new float[numClasses]();
+            vector<float> votes(numClasses, 0.0f);
 
-            // for each HC, if the point is inside, we simply up the count.
             for (int i = 0; i < circles.size(); i++) {
                 if (circles[i].insideCircle(dataToCheck)) {
 
-                    // regular vote, we just use the count of circles we're inside by class
-                    #if SIMPLE_VOTE
-                    votes[circles[i].classification] += 1.0f;
-                    #endif
 
-                    // vote with the amount of points in the circle.
-                    #if COUNT_VOTE
-                    votes[circles[i].classification] += circles[i].numPoints;
-                    #endif
+                    // determine which style voting
+                    switch (subMode) {
 
-                    #if DENSITY_VOTE
-                    // simple count/radius
-                    float r = max(circles[i].radius, 1e-6f);
-                    float weight = circles[i].numPoints / r;
-                    votes[circles[i].classification] += weight;
-                    #endif
+                        // regular vote, we just use the count of circles we're inside by class
+                        case SIMPLE_MAJORITY: {
+                            votes[circles[i].classification] += 1.0f;
+                            break;
+                        }
 
-                    #if DISTANCE_VOTE
-                    // count / distance from the center
-                    float dist = Utils::distance(dataToCheck, circles[i].centerPoint, Point::numAttributes);
-                    float weight = circles[i].numPoints / (dist + 1e-4f);
-                    votes[circles[i].classification] += weight;
-                    #endif
-                }
-            }
+                        // vote with the amount of points in the circle.
+                        case COUNT_VOTE: {
+                            votes[circles[i].classification] += circles[i].numPoints;
+                            break;
+                        }
+
+
+                        case DENSITY_VOTE: {
+                            // simple count/radius
+                            float r = max(circles[i].radius, 1e-6f);
+                            float weight = circles[i].numPoints / r;
+                            votes[circles[i].classification] += weight;
+                            break;
+                        }
+
+                        case DISTANCE_VOTE: {
+                            // count / distance from the center
+                            float dist = Utils::distance(dataToCheck, circles[i].centerPoint, Point::numAttributes);
+                            float weight = circles[i].numPoints / (dist + 1e-4f);
+                            votes[circles[i].classification] += weight;
+                            break;
+                        }
+
+                        case PER_CLASS_VOTE: {
+                            // we add 1 / num circles of this class as a vote.
+                            votes[circles[i].classification] += 1.0f / numCirclesPerClass[circles[i].classification];
+                            break;
+                        }
+
+                        // shut up the compiler
+                        default: {
+                            throw new runtime_error("Unknown classification mode");
+                        }
+                    } // voting switch
+                } // inside
+            } // circles loop
 
             // start maxVotes at 0. that way if no votes are cast, we know that we have to classify with the fallback mechanisms
             float maxVotes = 0.0f;
@@ -320,7 +345,7 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
                 }
             }
 
-            delete[] votes;
+            // end of using circles case.
             break;
         }
 

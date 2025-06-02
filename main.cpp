@@ -109,6 +109,7 @@ static void saveCircles(const vector<HyperCircle>& circles, const string& filena
     out.close();
 }
 
+// loads circles from a file
 static vector<HyperCircle> loadCircles(const string& filename) {
     ifstream in(filename, ios::binary);
     int32_t n;
@@ -147,11 +148,12 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
     #pragma omp parallel for reduction(+:unclassifiedCount)
     for (int p = 0; p < testData.size(); ++p) {
         const auto &point = testData[p];
-        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+
+        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::PER_CLASS_VOTE, NUM_CLASSES);
 
         if (predictedClass == -1) {
-            // re‐classify with KNN and assign back to predictedClass
-            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN,NUM_CLASSES);
+            // re‐classify with KNN and assign to predictedClass
+            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, HyperCircle::PER_CLASS_VOTE, NUM_CLASSES);
             unclassifiedCount++;
         }
 
@@ -181,6 +183,87 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
     return (float) totalRight / (float) testData.size();
 }
 
+// finds best HC voting style
+void findBestVoting (vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
+
+    // We'll store accuracy for each submode in this array (indices correspond to enum values 0–4).
+    float accuracies[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    // Loop over each HC voting submode
+    for (int subMode = HyperCircle::SIMPLE_MAJORITY; subMode <= HyperCircle::PER_CLASS_VOTE; ++subMode) {
+
+        vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
+        int unclassifiedCount = 0;
+
+        // Use a reduction on unclassifiedCount, and atomic updates for confusionMatrix entries.
+        #pragma omp parallel for reduction(+:unclassifiedCount)
+        for (int p = 0; p < testData.size(); ++p) {
+            const auto &point = testData[p];
+
+            int predictedClass = HyperCircle::classifyPoint(circles,train,point.location, HyperCircle::USE_CIRCLES, subMode, NUM_CLASSES);
+
+            // if not covered by our circle, use KNN.
+            if (predictedClass == -1) {
+                predictedClass = HyperCircle::classifyPoint(circles,train,point.location,HyperCircle::REGULAR_KNN,HyperCircle::PER_CLASS_VOTE, NUM_CLASSES);
+                unclassifiedCount++;
+            }
+
+            // Atomic increment of the appropriate cell in confusionMatrix
+            #pragma omp atomic
+            confusionMatrix[point.classification][predictedClass]++;
+        }
+
+        if (PRINTING) {
+            // Print header for this submode
+            switch (subMode) {
+                case HyperCircle::SIMPLE_MAJORITY:
+                    cout << "=== CONFUSION MATRIX (SIMPLE_MAJORITY) ===" << endl;
+                    break;
+                case HyperCircle::COUNT_VOTE:
+                    cout << "=== CONFUSION MATRIX (COUNT_VOTE) ===" << endl;
+                    break;
+                case HyperCircle::DENSITY_VOTE:
+                    cout << "=== CONFUSION MATRIX (DENSITY_VOTE) ===" << endl;
+                    break;
+                case HyperCircle::DISTANCE_VOTE:
+                    cout << "=== CONFUSION MATRIX (DISTANCE_VOTE) ===" << endl;
+                    break;
+                case HyperCircle::PER_CLASS_VOTE:
+                    cout << "=== CONFUSION MATRIX (PER_CLASS_VOTE) ===" << endl;
+                    break;
+            }
+
+            for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
+                for (int row = 0; row < CLASS_MAP.size(); ++row) {
+                    cout << confusionMatrix[cls][row] << "\t|| ";
+                }
+                cout << endl;
+            }
+            cout << "UNCLASSIFIED BY THE HCs:\t" << unclassifiedCount << endl << endl;
+        }
+
+        // count how many we got right
+        int totalRight = 0;
+        for (int cls = 0; cls < confusionMatrix.size(); cls++) {
+            totalRight += confusionMatrix[cls][cls];
+        }
+
+        // compute accuracy for this submode
+        accuracies[subMode] = (float) totalRight / (float) testData.size();
+    }
+
+    // After testing all submodes, print out each accuracy
+    if (PRINTING) {
+        cout << "=== HC Voting Submode Accuracies ===" << endl;
+        cout << "SIMPLE_MAJORITY: " << accuracies[HyperCircle::SIMPLE_MAJORITY] << endl;
+        cout << "COUNT_VOTE:      " << accuracies[HyperCircle::COUNT_VOTE] << endl;
+        cout << "DENSITY_VOTE:    " << accuracies[HyperCircle::DENSITY_VOTE] << endl;
+        cout << "DISTANCE_VOTE:   " << accuracies[HyperCircle::DISTANCE_VOTE] << endl;
+        cout << "PER_CLASS_VOTE:  " << accuracies[HyperCircle::PER_CLASS_VOTE] << endl;
+        cout << endl;
+    }
+}
+
 // return is accuracy, then average circle count
 pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
 
@@ -203,7 +286,7 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
                 trainingData.insert(trainingData.end(), kBuckets[trainFold].begin(), kBuckets[trainFold].end());
         }
 
-        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData);
+        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
 
         // get our accuracy on the test portion.
         totalAcc += testAccuracy(circles, trainingData, testData);
@@ -223,6 +306,7 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
     return {avgAcc, avgCircles};
 }
 
+// frees all the points
 void cleanupPoints(vector<Point> &data) {
     for (int i = 0; i < data.size(); ++i) {
         delete[] data[i].location;
@@ -250,11 +334,11 @@ int main() {
             case 1: {
                 // get our user input for the filename.
                 cout << "Enter training data filename: " << endl;
-#ifdef _WIN32
+                #ifdef _WIN32
                 system("dir datasets/");
                 #else
                 system("ls datasets/");
-#endif
+                #endif
 
                 string fileName;
                 getline(cin >> ws, fileName); // eat leading whitespace
@@ -275,11 +359,11 @@ int main() {
                 cout << "Enter testing data filename: " << endl;
                 string fileName;
 
-#ifdef _WIN32
+                #ifdef _WIN32
                 system("dir datasets/");
-#else
+                #else
                 system("ls datasets/");
-#endif
+                #endif
 
                 getline(cin, fileName);
                 testData = readFile(fileName);
@@ -289,7 +373,7 @@ int main() {
             }
             // generates HC's from the training file
             case 3: {
-                circles = HyperCircle::generateHyperCircles(trainData);
+                circles = HyperCircle::generateHyperCircles(trainData, NUM_CLASSES);
                 cout << "Generated: " << circles.size() << " HyperCircles." << endl;
                 Utils::waitForEnter();
                 break;
@@ -339,8 +423,12 @@ int main() {
                 break;
             }
 
-
             case 8: {
+                findBestVoting(circles, trainData, testData);
+                Utils::waitForEnter();
+                break;
+            }
+            case -1: {
                 running = false;
                 break;
             }
