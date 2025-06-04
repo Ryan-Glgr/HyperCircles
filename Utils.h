@@ -19,8 +19,10 @@
 class Utils {
 public:
 
-#define EUCLIDEAN 0
-#if EUCLIDEAN
+// TODO: implement L3 distance, which is known to do a little better on mnist.
+
+#define NORM 3
+#if NORM == 1
     // just a simple euclidean distance measure
     // we use restrict *'s and we use simd to vectorize this operation and do it FAST
     static inline float distance(const float* __restrict a, const float* __restrict b, const int n) {
@@ -45,7 +47,7 @@ public:
 
         return sqrt(sum);
     }
-#else
+#elif NORM == 2
     // a simple manhattan distance, which may be better for pictures, but is not a true "circle". it's a diamond or rhombus in shape
     static inline float distance(const float *__restrict a, const float * __restrict b, const int n) {
         float sum = 0.0f;
@@ -66,6 +68,27 @@ public:
             sum += std::fabs(a[i] - b[i]);
         }
         return sum;
+    }
+#else
+    // L3 distance: cube root of the sum of cubed absolute differences
+    static inline float distance(const float* __restrict a, const float* __restrict b, const int n) {
+        float sum = 0.0f;
+        const int limit = n & ~3;
+
+        #pragma omp simd reduction(+:sum)
+        for (int i = 0; i < limit; i += 4) {
+            float d0 = fabsf(a[i] - b[i]);
+            float d1 = fabsf(a[i+1] - b[i+1]);
+            float d2 = fabsf(a[i+2] - b[i+2]);
+            float d3 = fabsf(a[i+3] - b[i+3]);
+            sum += d0*d0*d0 + d1*d1*d1 + d2*d2*d2 + d3*d3*d3;
+        }
+
+        for (int i = limit; i < n; ++i) {
+            float d = fabsf(a[i] - b[i]);
+            sum += d*d*d;
+        }
+        return cbrtf(sum);
     }
 #endif
 
@@ -123,7 +146,5 @@ public:
     }
 
 };
-
-
 
 #endif //UTILS_H

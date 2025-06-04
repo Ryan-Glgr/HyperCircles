@@ -216,7 +216,7 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int n
     }
 
     // remove circles which don't uniquely classify any points
-    // removeUselessCircles(circles, data);
+    removeUselessCircles(circles, data);
 
     cout << "Useless Circles Removed...\nWe generated:\t" << circles.size() << " circles." << endl;
 
@@ -350,7 +350,7 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
         }
 
         case REGULAR_KNN: {
-            prediction = regularKNN(train, dataToCheck, 3, numClasses);
+            prediction = regularKNN(train, dataToCheck, 5, numClasses);
             break;
         }
 
