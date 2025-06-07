@@ -273,7 +273,7 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
     circles.erase(newEnd, circles.end());
 }
 
-int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode,int subMode,  int numClasses) {
+int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode, int subMode,  int numClasses, int k = 5) {
 
     // here we use our different classification options.
     // first option is to just take whichever class we find our point in the most.
@@ -286,9 +286,11 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
 
             vector<float> votes(numClasses, 0.0f);
 
+            // smallest circles radius and class
+            pair<float, int> smallestCircle {numeric_limits<float>::max(), -1};
+
             for (int i = 0; i < circles.size(); i++) {
                 if (circles[i].insideCircle(dataToCheck)) {
-
 
                     // determine which style voting
                     switch (subMode) {
@@ -328,13 +330,31 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
                             break;
                         }
 
+                        case SMALLEST_CIRCLE: {
+                            // get our distance.
+                            float distance = Utils::distance(circles[i].centerPoint, dataToCheck, Point::numAttributes);
+
+                            // if we're inside, and this is smallest circle, we take this circle's classification.
+                            if (distance < smallestCircle.first) {
+                                smallestCircle.first = distance;
+                                smallestCircle.second = i;
+                            }
+                            break;
+                        }
+
                         // shut up the compiler
                         default: {
+                            cout << "FUCK\n";
                             throw new runtime_error("Unknown classification mode");
                         }
                     } // voting switch
                 } // inside
             } // circles loop
+
+            // if we were looking for smallest circle, we can just return it from here.
+            if (subMode == SMALLEST_CIRCLE) {
+                return circles[smallestCircle.second].classification;
+            }
 
             // start maxVotes at 0. that way if no votes are cast, we know that we have to classify with the fallback mechanisms
             float maxVotes = 0.0f;
@@ -349,11 +369,25 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
             break;
         }
 
+        // standard knn algorithm
         case REGULAR_KNN: {
-            prediction = regularKNN(train, dataToCheck, 5, numClasses);
+            prediction = regularKNN(train, dataToCheck, k, numClasses);
             break;
         }
 
+        // k nearest HC's by radius
+        case K_NEAREST_CIRCLES: {
+            prediction = kNearestCircle(circles, dataToCheck, k, numClasses);
+            break;
+        }
+
+        // k nearest HC's by distance / radius. this way we know relatively how far outside a circles radius it was.
+        case K_NEAREST_RATIOS: {
+            prediction = kNearestCircleRatio(circles, dataToCheck, k, numClasses);
+            break;
+        }
+
+        default:{}
     }
 
     // fallback mechanism
@@ -382,4 +416,46 @@ int HyperCircle::regularKNN(vector<Point> &data, float *point, int k, int numCla
 
     // return our best class by finding max element
     return distance(votes.begin(),max_element(votes.begin(), votes.end()));
+}
+
+int HyperCircle::kNearestCircle(vector<HyperCircle> &circles, float *point, int k, int numClasses) {
+
+    vector<pair<float, int>> distances(circles.size());
+
+    #pragma omp parallel for
+    for (int c = 0; c < circles.size(); ++c) {
+        // save our distance and this circles class
+        distances[c] = {Utils::distance(circles[c].centerPoint, point, Point::numAttributes), circles[c].classification};
+    }
+
+    nth_element(distances.begin(),distances.begin() + k, distances.end(),[](const auto& a, const auto& b){ return a.first < b.first; });
+
+    // vote. weighting by the 1 / distance.
+    vector<float> votes(numClasses, 0.0f);
+    for (int i = 0; i < k; ++i)
+        votes[distances[i].second] += (1 / distances[i].first);
+
+    // return our best class by finding max element
+    return distance(votes.begin(), max_element(votes.begin(), votes.end()));
+}
+
+int HyperCircle::kNearestCircleRatio(vector<HyperCircle> &circles, float *point, int k, int numClasses) {
+
+    vector<pair<float, int>> distances(circles.size());
+
+    #pragma omp parallel for
+    for (int c = 0; c < circles.size(); ++c) {
+        // save our distance / radius, and the class corresponding to this circle
+        distances[c] = {(Utils::distance(circles[c].centerPoint, point, Point::numAttributes) / circles[c].radius), circles[c].classification};
+    }
+
+    nth_element(distances.begin(),distances.begin() + k, distances.end(),[](const auto& a, const auto& b){ return a.first < b.first; });
+
+    // vote. weighting by the 1 / distance.
+    vector<float> votes(numClasses, 0.0f);
+    for (int i = 0; i < k; ++i)
+        votes[distances[i].second] += (1 / distances[i].first);
+
+    // return our best class by finding max element
+    return distance(votes.begin(), max_element(votes.begin(), votes.end()));
 }

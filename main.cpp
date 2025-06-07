@@ -140,25 +140,22 @@ static vector<HyperCircle> loadCircles(const string& filename) {
 }
 
 // tests the accuracy with our test set.
-float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
+float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData, int k) {
 
     vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
     int unclassifiedCount = 0;
-    // Use a reduction on unclassifiedCount, and atomic updates for confusionMatrix entries.
-    #pragma omp parallel for reduction(+:unclassifiedCount)
     for (int p = 0; p < testData.size(); ++p) {
         const auto &point = testData[p];
 
-        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES);
+        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES, k);
 
         if (predictedClass == -1) {
             // re‐classify with KNN and assign to predictedClass
-            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, HyperCircle::PER_CLASS_VOTE, NUM_CLASSES);
+            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, HyperCircle::PER_CLASS_VOTE, NUM_CLASSES, k);
             unclassifiedCount++;
         }
 
-        // Atomic increment of the appropriate cell in confusionMatrix
-        #pragma omp atomic
+        // increment of the appropriate cell in confusionMatrix
         confusionMatrix[point.classification][predictedClass]++;
     }
 
@@ -184,32 +181,31 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
 }
 
 // finds best HC voting style
-void findBestVoting (vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
+void findBestHCVoting (vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
 
     // We'll store accuracy for each submode in this array (indices correspond to enum values 0–4).
-    float accuracies[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float accuracies[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
     // Loop over each HC voting submode
-    for (int subMode = HyperCircle::SIMPLE_MAJORITY; subMode <= HyperCircle::PER_CLASS_VOTE; ++subMode) {
+    for (int subMode = HyperCircle::SIMPLE_MAJORITY; subMode <= HyperCircle::SMALLEST_CIRCLE; ++subMode) {
 
         vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
         int unclassifiedCount = 0;
 
-        // Use a reduction on unclassifiedCount, and atomic updates for confusionMatrix entries.
-        #pragma omp parallel for reduction(+:unclassifiedCount)
+        int k = 5;
+
         for (int p = 0; p < testData.size(); ++p) {
             const auto &point = testData[p];
 
-            int predictedClass = HyperCircle::classifyPoint(circles,train,point.location, HyperCircle::USE_CIRCLES, subMode, NUM_CLASSES);
+            int predictedClass = HyperCircle::classifyPoint(circles,train,point.location, HyperCircle::USE_CIRCLES, subMode, NUM_CLASSES, k);
 
             // if not covered by our circle, use KNN.
             if (predictedClass == -1) {
-                predictedClass = HyperCircle::classifyPoint(circles,train,point.location,HyperCircle::REGULAR_KNN,HyperCircle::PER_CLASS_VOTE, NUM_CLASSES);
+                predictedClass = HyperCircle::classifyPoint(circles,train,point.location,HyperCircle::REGULAR_KNN,HyperCircle::PER_CLASS_VOTE, NUM_CLASSES, k);
                 unclassifiedCount++;
             }
 
-            // Atomic increment of the appropriate cell in confusionMatrix
-            #pragma omp atomic
+            // increment of the appropriate cell in confusionMatrix
             confusionMatrix[point.classification][predictedClass]++;
         }
 
@@ -230,6 +226,9 @@ void findBestVoting (vector<HyperCircle> &circles, vector<Point> &train, vector<
                     break;
                 case HyperCircle::PER_CLASS_VOTE:
                     cout << "=== CONFUSION MATRIX (PER_CLASS_VOTE) ===" << endl;
+                    break;
+                case HyperCircle::SMALLEST_CIRCLE:
+                    cout << "=== CONFUSION MATRIX (SMALLEST CIRCLE) ===" << endl;
                     break;
             }
 
@@ -260,8 +259,107 @@ void findBestVoting (vector<HyperCircle> &circles, vector<Point> &train, vector<
         cout << "DENSITY_VOTE:    " << accuracies[HyperCircle::DENSITY_VOTE] << endl;
         cout << "DISTANCE_VOTE:   " << accuracies[HyperCircle::DISTANCE_VOTE] << endl;
         cout << "PER_CLASS_VOTE:  " << accuracies[HyperCircle::PER_CLASS_VOTE] << endl;
+        cout << "SMALLEST_CIRCLE:" << accuracies[HyperCircle::SMALLEST_CIRCLE] << endl;
         cout << endl;
     }
+}
+
+void findBestKNNStyle(vector<HyperCircle> &circles, vector<Point> &train, vector<Point> &testData) {
+
+    // different k values to test
+    vector<float> kVals {1, 3, 5, 7, 9, 13, 15, 21, 25};
+
+    vector<vector<int>> confusionMatrix(CLASS_MAP.size(), vector<int>(CLASS_MAP.size()));
+    int unclassifiedCount = 0;
+
+    vector<Point> pointsNotClassified;
+
+    // classify all points with HC's as normal
+    for (int p = 0; p < testData.size(); ++p) {
+        const auto &point = testData[p];
+
+        int predictedClass = HyperCircle::classifyPoint(circles,train,point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES, -1);
+
+        // if not covered by our circle, use KNN.
+        if (predictedClass == -1) {
+            unclassifiedCount++;
+            // push back this point so that we know we have to run KNN on it.
+            pointsNotClassified.push_back(point);
+        }
+
+        // Atomic increment of the appropriate cell in confusionMatrix
+        confusionMatrix[point.classification][predictedClass]++;
+    }
+    cout << "HC's Covered: " << unclassifiedCount << " of the test points!" << endl;
+
+    for (int k = 0; k < kVals.size(); ++k) {
+
+        // Loop over each HC voting submode
+        float accuracies[3] = {0.0f, 0.0f, 0.0f};
+
+        for (int subMode = HyperCircle::REGULAR_KNN; subMode <= HyperCircle::K_NEAREST_RATIOS; ++subMode) {
+
+            // copy the confusion matrix which was generated by the HC's
+            auto thisConfigConfusionMatrix = confusionMatrix;
+
+            for (int p = 0; p < pointsNotClassified.size(); ++p) {
+                const auto &point = pointsNotClassified[p];
+
+                int predictedClass = HyperCircle::classifyPoint(circles,train,point.location, subMode, -1, NUM_CLASSES, kVals[k]);
+
+                // if not covered by our circle, use KNN.
+                if (predictedClass == -1) {
+                    cout << "KNN RETURNED -1!" << endl;
+                }
+
+                // increment of the appropriate cell in confusionMatrix
+                thisConfigConfusionMatrix[point.classification][predictedClass]++;
+            }
+
+            if (PRINTING) {
+                cout << "K = " << k << endl;
+                // Print header for this submode
+                switch (subMode) {
+                    case HyperCircle::REGULAR_KNN:
+                        cout << "=== CONFUSION MATRIX (REGULAR KNN) ===" << endl;
+                    break;
+                    case HyperCircle::K_NEAREST_CIRCLES:
+                        cout << "=== CONFUSION MATRIX (NEAREST CIRCLE) ===" << endl;
+                    break;
+                    case HyperCircle::K_NEAREST_RATIOS:
+                        cout << "=== CONFUSION MATRIX (NEAREST RATIOS) ===" << endl;
+                    break;
+                }
+
+                for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
+                    for (int row = 0; row < CLASS_MAP.size(); ++row) {
+                        cout << thisConfigConfusionMatrix[cls][row] << "\t|| ";
+                    }
+                    cout << endl;
+                }
+            }
+
+            // count how many we got right
+            int totalRight = 0;
+            for (int cls = 0; cls < confusionMatrix.size(); cls++) {
+                totalRight += thisConfigConfusionMatrix[cls][cls];
+            }
+
+            // compute accuracy for this submode
+            accuracies[subMode - HyperCircle::REGULAR_KNN] = (float) totalRight / (float) testData.size();
+
+        } // end submode
+
+        // After testing all submodes, print out each accuracy
+        if (PRINTING) {
+            cout << "=== KNN Voting Submode Accuracies with K value: " << kVals[k] << "===" << endl;
+            cout << "REGULAR_KNN: " << accuracies[0] << endl;
+            cout << "K_NEAREST_CIRCLES: " << accuracies[1] << endl;
+            cout << "K_NEAREST_RATIOS: " << accuracies[2] << endl;
+            cout << endl;
+        }
+    } // end k val
+
 }
 
 // return is accuracy, then average circle count
@@ -289,7 +387,8 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
         vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
 
         // get our accuracy on the test portion.
-        totalAcc += testAccuracy(circles, trainingData, testData);
+        int k = 5;
+        totalAcc += testAccuracy(circles, trainingData, testData, k);
 
         // add our count so we can track how many circles we needed.
         totalCircles += circles.size();
@@ -380,7 +479,8 @@ int main() {
             }
             // tests against a given test set
             case 4: {
-                float acc = testAccuracy(circles, trainData,testData);
+                int k = 5;
+                float acc = testAccuracy(circles, trainData,testData, k);
                 cout << "Accuracy: " << acc << endl;
                 Utils::waitForEnter();
                 break;
@@ -424,7 +524,13 @@ int main() {
             }
 
             case 8: {
-                findBestVoting(circles, trainData, testData);
+                findBestHCVoting(circles, trainData, testData);
+                Utils::waitForEnter();
+                break;
+            }
+
+            case 9: {
+                findBestKNNStyle(circles, trainData, testData);
                 Utils::waitForEnter();
                 break;
             }

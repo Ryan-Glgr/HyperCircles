@@ -56,24 +56,33 @@ public:
     bool insideCircle(float *dataToCheck);
 
     // classification mode determines whether we use HC's or KNN (or whatever other fallback). then we use the sub mode in the switch to determine voting style or which particular fallback
-    static int classifyPoint(std::vector<HyperCircle> &circles, std::vector<Point> &train, float *dataToCheck, int classificationMode, int subMode,  int numClasses);
+    static int classifyPoint(std::vector<HyperCircle> &circles, std::vector<Point> &train, float *dataToCheck, int classificationMode, int subMode,  int numClasses, int k);
 
-    // all the different ways we can use the HC's for voting on which class
+    // all the different ways we can use the HC's for voting on each class
     enum {
         SIMPLE_MAJORITY = 0,
         COUNT_VOTE = 1,
         DENSITY_VOTE = 2,
         DISTANCE_VOTE = 3,
-        PER_CLASS_VOTE = 4
+        PER_CLASS_VOTE = 4,
+        SMALLEST_CIRCLE = 5
     };
 
     // used for the different fallback types
     enum {
         USE_CIRCLES = 0, // normal version, where we are not using fallback.
-        REGULAR_KNN = 1
+        REGULAR_KNN = 1,
+        K_NEAREST_CIRCLES = 2,
+        K_NEAREST_RATIOS = 3,
     };
 
     static int regularKNN(std::vector<Point> &data, float *point, int k, int numClasses);
+
+    static int kNearestCircle(std::vector<HyperCircle> &circles, float *point, int k, int numClasses);
+
+    static int kNearestCircleRatio(std::vector<HyperCircle> &circles, float *point, int k, int numClasses);
+
+
 
 };
 

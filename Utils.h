@@ -19,10 +19,31 @@
 class Utils {
 public:
 
-// TODO: implement L3 distance, which is known to do a little better on mnist.
-
 #define NORM 3
+
 #if NORM == 1
+    // a simple manhattan distance, which may be better for pictures, but is not a true "circle". it's a diamond or rhombus in shape
+    static inline float distance(const float *__restrict a, const float * __restrict b, const int n) {
+        float sum = 0.0f;
+
+        // get the largest number we can iterate through to in our unrolled loops
+        const int limit = n & ~3;
+
+#pragma omp simd reduction(+:sum)
+        for (int i = 0; i < limit; i += 4) {
+            sum += std::fabs(a[i] - b[i]);
+            sum += std::fabs(a[i+1] - b[i+1]);
+            sum += std::fabs(a[i+2] - b[i+2]);
+            sum += std::fabs(a[i+3] - b[i+3]);
+        }
+
+        // handle remaining stuff
+        for (int i = limit; i < n; ++i) {
+            sum += std::fabs(a[i] - b[i]);
+        }
+        return sum;
+    }
+#elif NORM == 2
     // just a simple euclidean distance measure
     // we use restrict *'s and we use simd to vectorize this operation and do it FAST
     static inline float distance(const float* __restrict a, const float* __restrict b, const int n) {
@@ -46,28 +67,6 @@ public:
         }
 
         return sqrt(sum);
-    }
-#elif NORM == 2
-    // a simple manhattan distance, which may be better for pictures, but is not a true "circle". it's a diamond or rhombus in shape
-    static inline float distance(const float *__restrict a, const float * __restrict b, const int n) {
-        float sum = 0.0f;
-
-        // get the largest number we can iterate through to in our unrolled loops
-        const int limit = n & ~3;
-
-        #pragma omp simd reduction(+:sum)
-        for (int i = 0; i < limit; i += 4) {
-            sum += std::fabs(a[i] - b[i]);
-            sum += std::fabs(a[i+1] - b[i+1]);
-            sum += std::fabs(a[i+2] - b[i+2]);
-            sum += std::fabs(a[i+3] - b[i+3]);
-        }
-
-        // handle remaining stuff
-        for (int i = limit; i < n; ++i) {
-            sum += std::fabs(a[i] - b[i]);
-        }
-        return sum;
     }
 #else
     // L3 distance: cube root of the sum of cubed absolute differences
@@ -114,6 +113,7 @@ public:
         std::cout << "6. Save HC's to a file\n";
         std::cout << "7. Load HC's from a file\n";
         std::cout << "8. Find Best HC voting on test data.\n";
+        std::cout << "9. Find Best KNN mode on test data.\n";
         std::cout << std::endl;
         std::cout << "-1. Exit\n";
     }
