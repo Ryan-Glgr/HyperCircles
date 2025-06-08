@@ -19,7 +19,7 @@
 class Utils {
 public:
 
-#define NORM 3
+#define NORM 2
 
 #if NORM == 1
     // a simple manhattan distance, which may be better for pictures, but is not a true "circle". it's a diamond or rhombus in shape
@@ -107,14 +107,18 @@ public:
         std::cout << "1. Import training data.\n";
         std::cout << "2. Import testing data.\n";
         std::cout << std::endl;
-        std::cout << "3. Generate HyperCircles.\n";
-        std::cout << "4. Test HyperCircles.\n";
-        std::cout << "5. K Fold Cross Validation.\n\n";
-        std::cout << "6. Save HC's to a file\n";
-        std::cout << "7. Load HC's from a file\n";
-        std::cout << "8. Find Best HC voting on test data.\n";
-        std::cout << "9. Find Best KNN mode on test data.\n";
+        std::cout << "3. Generate HyperCircles using nearest neighbor and merging.\n";
+        std::cout << "4. Generate HyperCircles using max radius search.\n";
         std::cout << std::endl;
+        std::cout << "5. Test HyperCircles.\n";
+        std::cout << "6. K Fold Cross Validation.\n";
+        std::cout << std::endl;
+        std::cout << "7. Save HC's to a file\n";
+        std::cout << "8. Load HC's from a file\n";
+        std::cout << std::endl;
+        std::cout << "9. Find Best HC voting on test data.\n";
+        std::cout << "10. Find Best KNN mode on test data.\n";
+        std::cout << std::endl << std::endl;
         std::cout << "-1. Exit\n";
     }
 

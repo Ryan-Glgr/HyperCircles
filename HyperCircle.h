@@ -29,6 +29,9 @@ public:
 
     float *centerPoint;
 
+    // might help us to create less circles, and more useful ones.
+    float maxPureDistance;
+
     int classification;
 
     int numPoints;
@@ -41,16 +44,21 @@ public:
     // finds the nearest neighbor to each HC
     void findNearestNeighbor(std::vector<Point> &dataSet);
 
+    // similar to find nearest neighbor based creation. but this time it makes each circle as big as possible. and we are going to kill circle which are useless like normal.
+    void findMaxDistance(std::vector<Point> &dataSet);
+
     // creates our list of HC's
     static std::vector<HyperCircle> createCircles(std::vector<Point> &dataset);
 
     // function which takes all our built circles, and starts deleting them as possible.
-    static void mergeCircles(std::vector<HyperCircle> &circles, std::vector<Point> &data);
+    static void mergeCircles(std::vector<HyperCircle> &circles, std::vector<Point> &dataSet);
 
     // wrapper function which makes all our circles by finding neighbors, then runs the merging algorithm and returns us our circles list
-    static std::vector<HyperCircle> generateHyperCircles(std::vector<Point> &data, int numClasses);
+    static std::vector<HyperCircle> generateHyperCircles(std::vector<Point> &dataSet, int numClasses);
 
-    static void removeUselessCircles(std::vector<HyperCircle> &circles, std::vector<Point> &data);
+    static std::vector<HyperCircle> generateMaxDistanceBasedHyperCircles(std::vector<Point> &dataSet, int numClasses);
+
+    static void removeUselessCircles(std::vector<HyperCircle> &circles, std::vector<Point> &dataSet);
 
     // helper function which checks if a given HC has a point inside it
     bool insideCircle(float *dataToCheck);
@@ -76,7 +84,7 @@ public:
         K_NEAREST_RATIOS = 3,
     };
 
-    static int regularKNN(std::vector<Point> &data, float *point, int k, int numClasses);
+    static int regularKNN(std::vector<Point> &dataSet, float *point, int k, int numClasses);
 
     static int kNearestCircle(std::vector<HyperCircle> &circles, float *point, int k, int numClasses);
 

@@ -5,11 +5,13 @@ using namespace std;
 // parameters we can play with.
 #define MIN_RADIUS 0.0f
 
+// tracks how many circles we have in each class.
 vector<int> HyperCircle::numCirclesPerClass;
 
 HyperCircle::HyperCircle() {
     radius = 0.0f;
     centerPoint = nullptr;
+    maxPureDistance = 0.0f;
     classification = -1;
     numPoints = -1;
 }
@@ -17,6 +19,7 @@ HyperCircle::HyperCircle() {
 HyperCircle::HyperCircle(float rad, float *center, int cls) {
     radius = rad;
     centerPoint = center;
+    maxPureDistance = rad;
     classification = cls;
     numPoints = 1;
 }
@@ -35,9 +38,9 @@ void HyperCircle::findNearestNeighbor(vector<Point> &dataSet) {
             continue;
         }
 
+        // take the distance
         float newDist = Utils::distance(p.location, centerPoint, Point::numAttributes);
 
-        // using <= so that if we had a TIE, we would update classification. this might help us catch errors
         if (newDist < minDist) {
             minDist = newDist;
             minClass = p.classification;
@@ -52,10 +55,36 @@ void HyperCircle::findNearestNeighbor(vector<Point> &dataSet) {
         }
     }
 
-    // if our nearest point was this class, we use the distance to it as our radius. if not, we need to leave radius as 0.0
+    // if our nearest point was this class, we use the distance to it as our radius. if not, we need to leave radius as 0.0. if 0.0 we kill the circle later.
     if (minClass == this->classification) {
         radius = minDist;
     }
+}
+
+// similar to findNearestNeighbor. but this version finds the largest pure distance. this way we know exactly how big each circle can be.
+// then we can set all the radiuses to said distance, and just remove useless circles. no merging needed.
+void HyperCircle::findMaxDistance(vector<Point> &dataSet) {
+
+    // store distance to all training points
+    vector<pair<float, int>> distances(dataSet.size());
+
+    // compute all those distances
+    for (int dp = 0; dp < dataSet.size(); ++dp) {
+        distances[dp] = {Utils::distance(dataSet[dp].location, this->centerPoint, Point::numAttributes), dataSet[dp].classification};
+    }
+
+    // sort all those distances.
+    sort(distances.begin(), distances.end());
+
+    // set our radius to the largest distance we can use while keeping pure classification
+    float maxDistance = 0.0f;
+    for (auto & distance : distances) {
+        if (distance.second == this->classification) {
+            maxPureDistance = maxDistance;
+        }
+        else break;
+    }
+
 }
 
 // takes in the entire dataset
@@ -83,8 +112,7 @@ vector<HyperCircle> HyperCircle::createCircles(vector<Point> &dataset) {
 }
 
 // function which takes all our built circles, and starts deleting them as possible.
-// function which takes all our built circles, and starts deleting them as possible.
-void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data) {
+void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& dataSet) {
 
     for (int idx = 0; idx < circles.size(); ++idx) {
 
@@ -133,7 +161,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
 
             // get our info about this circle
             float newR2 = smallestDistance.first;
-            int   circleID = smallestDistance.second;
+            int circleID = smallestDistance.second;
 
             // if the distance is inside our existing radius, we can skip and mark this guy as eaten.
             if (newR2 <= c.radius) {
@@ -143,7 +171,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
 
             atomic_int canMerge{1}; // shared flag
             #pragma omp parallel for schedule(static) shared(canMerge)
-            for (auto pt : data) {
+            for (auto pt : dataSet) {
 
                 if (!canMerge)
                     continue;   // early-out after failure
@@ -184,16 +212,16 @@ bool HyperCircle::insideCircle(float *dataToCheck) {
     return (Utils::distance(centerPoint, dataToCheck, Point::numAttributes) <= radius);
 }
 
-// function which makes us a list of circles given some pre processed data
-vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int numClasses) {
+// function which makes us a list of circles given some pre processed dataSet
+vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &dataSet, int numClasses) {
 
     // generate our initial list of circles
-    vector<HyperCircle> circles = createCircles(data);
+    vector<HyperCircle> circles = createCircles(dataSet);
 
     cout << "Circles created...\nBeginning Merging." << endl;
 
     // merge our circles so that we can get larger circles
-    mergeCircles(circles, data);
+    mergeCircles(circles, dataSet);
 
     cout << "Circles merged...\nRemoving Circles" << endl;
 
@@ -204,7 +232,7 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int n
         // do a reduction to efficiently compute the size of the circle in terms of point count
         // we do the reduction because we are computing a ton of euclidean distances in the inside function.
         #pragma omp parallel for reduction(+ : insideCount)
-        for (auto & point : data) {
+        for (auto & point : dataSet) {
 
             // if this point is inside, increment numPoints
             if (circle.insideCircle(point.location)) {
@@ -216,7 +244,7 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int n
     }
 
     // remove circles which don't uniquely classify any points
-    removeUselessCircles(circles, data);
+    removeUselessCircles(circles, dataSet);
 
     cout << "Useless Circles Removed...\nWe generated:\t" << circles.size() << " circles." << endl;
 
@@ -228,7 +256,55 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &data, int n
     return circles;
 }
 
-void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Point> &data) {
+// generates circles based on how big their radius can possible be of pure classification. then we simplify by removing useless circles.
+vector<HyperCircle> HyperCircle::generateMaxDistanceBasedHyperCircles(vector<Point> &dataSet, int numClasses) {
+    vector<HyperCircle> circles(dataSet.size());
+
+    // Parallel HC creation.
+    #pragma omp parallel for
+    for (int i = 0; i < dataSet.size(); ++i) {
+        Point &p = dataSet[i];
+        circles[i] = HyperCircle(0.0f, p.location, p.classification);
+    }
+
+    #pragma omp parallel for
+    for (auto & circle : circles) {
+        circle.findMaxDistance(dataSet);
+    }
+
+    // count how many points are in each circle.
+    for (auto &circle : circles) {
+
+        int insideCount = 0;
+        // do a reduction to efficiently compute the size of the circle in terms of point count
+        // we do the reduction because we are computing a ton of euclidean distances in the inside function.
+        #pragma omp parallel for reduction(+ : insideCount)
+        for (auto & point : dataSet) {
+
+            // if this point is inside, increment numPoints
+            if (circle.insideCircle(point.location)) {
+                insideCount++;
+            }
+        }
+        // update the value now that the for loop is over
+        circle.numPoints = insideCount;
+    }
+
+    // remove circles which don't uniquely classify any points
+    removeUselessCircles(circles, dataSet);
+
+    cout << "Useless Circles Removed...\nWe generated:\t" << circles.size() << " circles." << endl;
+
+    // get our count of how many circles per class
+    numCirclesPerClass.resize(numClasses);
+    for (auto &circle : circles)
+        numCirclesPerClass[circle.classification]++;
+
+    return circles;
+}
+
+// simplification. removes circles which classify no points uniquely.
+void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Point> &dataSet) {
     // vector to track how many points each circle had
     vector<int> circlePointCounts(circles.size(), 0);
 
@@ -239,17 +315,23 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
 
         // take every point, and find it's biggest circle it fits inside of by radius
         #pragma omp for schedule(static)
-        for (auto p : data) {
+        for (auto p : dataSet) {
 
             // get our biggest count, track it, get our point
-            int biggestCount = 0;
+            float biggestRadius = 0;
             int bestCircleIndex = -1;
 
             // find the best circle
             for (int circ = 0; circ < circles.size(); circ++) {
                 auto &c = circles[circ];
-                if (c.numPoints > biggestCount && c.insideCircle(p.location)) {
-                    biggestCount = c.numPoints;
+
+                // we can do this because we always use PURE circles.
+                if (c.classification != p.classification)
+                    continue;
+
+
+                if (c.insideCircle(p.location) && c.radius > biggestRadius) {
+                    biggestRadius = c.numPoints;
                     bestCircleIndex = circ;
                 }
             }
@@ -344,7 +426,6 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
 
                         // shut up the compiler
                         default: {
-                            cout << "FUCK\n";
                             throw new runtime_error("Unknown classification mode");
                         }
                     } // voting switch
@@ -394,13 +475,13 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
     return prediction;
 }
 
-int HyperCircle::regularKNN(vector<Point> &data, float *point, int k, int numClasses) {
+int HyperCircle::regularKNN(vector<Point> &dataSet, float *point, int k, int numClasses) {
 
-    vector<pair<float, int>> distances(data.size());
+    vector<pair<float, int>> distances(dataSet.size());
 
     #pragma omp parallel for
-    for (int dp = 0; dp < data.size(); ++dp) {
-        distances[dp] = {Utils::distance(data[dp].location, point, Point::numAttributes), data[dp].classification};
+    for (int dp = 0; dp < dataSet.size(); ++dp) {
+        distances[dp] = {Utils::distance(dataSet[dp].location, point, Point::numAttributes), dataSet[dp].classification};
     }
 
     // sort up to kth element. clamping if needed

@@ -290,7 +290,7 @@ void findBestKNNStyle(vector<HyperCircle> &circles, vector<Point> &train, vector
         // Atomic increment of the appropriate cell in confusionMatrix
         confusionMatrix[point.classification][predictedClass]++;
     }
-    cout << "HC's Covered: " << unclassifiedCount << " of the test points!" << endl;
+    cout << "HC's Missed: " << unclassifiedCount << " of the test points!" << endl;
 
     for (int k = 0; k < kVals.size(); ++k) {
 
@@ -317,7 +317,7 @@ void findBestKNNStyle(vector<HyperCircle> &circles, vector<Point> &train, vector
             }
 
             if (PRINTING) {
-                cout << "K = " << k << endl;
+                cout << "K = " << kVals[k] << endl;
                 // Print header for this submode
                 switch (subMode) {
                     case HyperCircle::REGULAR_KNN:
@@ -477,8 +477,16 @@ int main() {
                 Utils::waitForEnter();
                 break;
             }
-            // tests against a given test set
+
             case 4: {
+                circles = HyperCircle::generateMaxDistanceBasedHyperCircles(trainData, NUM_CLASSES);
+                cout << "Generated: " << circles.size() << " HyperCircles." << endl;
+                Utils::waitForEnter();
+                break;
+            }
+
+            // tests against a given test set
+            case 5: {
                 int k = 5;
                 float acc = testAccuracy(circles, trainData,testData, k);
                 cout << "Accuracy: " << acc << endl;
@@ -486,7 +494,7 @@ int main() {
                 break;
             }
             // k fold validation
-            case 5: {
+            case 6: {
 
                 int numFolds;
                 cout << "How many folds of cross validation (K value) ?" << endl;
@@ -500,7 +508,7 @@ int main() {
                 break;
             }
 
-            case 6: {
+            case 7: {
                 cout << "Enter HC's file name to save to: " << endl;
                 string fileName;
                 getline(cin, fileName);
@@ -511,7 +519,7 @@ int main() {
                 break;
             }
 
-            case 7: {
+            case 8: {
                 cout << "Enter HC's file name to load from: " << endl;
                 string fileName;
                 getline(cin, fileName);
@@ -523,13 +531,13 @@ int main() {
                 break;
             }
 
-            case 8: {
+            case 9: {
                 findBestHCVoting(circles, trainData, testData);
                 Utils::waitForEnter();
                 break;
             }
 
-            case 9: {
+            case 10: {
                 findBestKNNStyle(circles, trainData, testData);
                 Utils::waitForEnter();
                 break;
