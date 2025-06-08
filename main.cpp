@@ -470,6 +470,7 @@ int main() {
                 Utils::waitForEnter();
                 break;
             }
+
             // generates HC's from the training file
             case 3: {
                 circles = HyperCircle::generateHyperCircles(trainData, NUM_CLASSES);
@@ -478,6 +479,7 @@ int main() {
                 break;
             }
 
+            // generates HC's using max radius based creation instead of merging.
             case 4: {
                 circles = HyperCircle::generateMaxDistanceBasedHyperCircles(trainData, NUM_CLASSES);
                 cout << "Generated: " << circles.size() << " HyperCircles." << endl;
@@ -493,6 +495,7 @@ int main() {
                 Utils::waitForEnter();
                 break;
             }
+
             // k fold validation
             case 6: {
 
@@ -542,10 +545,12 @@ int main() {
                 Utils::waitForEnter();
                 break;
             }
+
             case -1: {
                 running = false;
                 break;
             }
+
             default: {
                 break;
             }

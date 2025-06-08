@@ -11,7 +11,6 @@ vector<int> HyperCircle::numCirclesPerClass;
 HyperCircle::HyperCircle() {
     radius = 0.0f;
     centerPoint = nullptr;
-    maxPureDistance = 0.0f;
     classification = -1;
     numPoints = -1;
 }
@@ -19,7 +18,6 @@ HyperCircle::HyperCircle() {
 HyperCircle::HyperCircle(float rad, float *center, int cls) {
     radius = rad;
     centerPoint = center;
-    maxPureDistance = rad;
     classification = cls;
     numPoints = 1;
 }
@@ -57,7 +55,7 @@ void HyperCircle::findNearestNeighbor(vector<Point> &dataSet) {
 
     // if our nearest point was this class, we use the distance to it as our radius. if not, we need to leave radius as 0.0. if 0.0 we kill the circle later.
     if (minClass == this->classification) {
-        radius = minDist;
+        this->radius = minDist;
     }
 }
 
@@ -77,14 +75,11 @@ void HyperCircle::findMaxDistance(vector<Point> &dataSet) {
     sort(distances.begin(), distances.end());
 
     // set our radius to the largest distance we can use while keeping pure classification
-    float maxDistance = 0.0f;
     for (auto & distance : distances) {
-        if (distance.second == this->classification) {
-            maxPureDistance = maxDistance;
-        }
-        else break;
+        if (distance.second != this->classification)
+            break;
+        this->radius = distance.first;
     }
-
 }
 
 // takes in the entire dataset
@@ -101,8 +96,8 @@ vector<HyperCircle> HyperCircle::createCircles(vector<Point> &dataset) {
 
     // update each circle's radius to our nearest neighbor.
     #pragma omp parallel for
-    for (auto & circle : circles) {
-        circle.findNearestNeighbor(dataset);
+    for (int i = 0; i < circles.size(); i++) {
+        circles[i].findNearestNeighbor(dataset);
     }
 
     // delete entirely all those circles which had a radius of 0.0f. meaning their nearest neighbor is wrong class. 
@@ -171,7 +166,7 @@ void HyperCircle::mergeCircles(vector<HyperCircle>& circles, vector<Point>& data
 
             atomic_int canMerge{1}; // shared flag
             #pragma omp parallel for schedule(static) shared(canMerge)
-            for (auto pt : dataSet) {
+            for (auto & pt : dataSet) {
 
                 if (!canMerge)
                     continue;   // early-out after failure
@@ -214,6 +209,9 @@ bool HyperCircle::insideCircle(float *dataToCheck) {
 
 // function which makes us a list of circles given some pre processed dataSet
 vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &dataSet, int numClasses) {
+
+    numCirclesPerClass.clear();
+    numCirclesPerClass.resize(numClasses);
 
     // generate our initial list of circles
     vector<HyperCircle> circles = createCircles(dataSet);
@@ -258,6 +256,10 @@ vector<HyperCircle> HyperCircle::generateHyperCircles(vector<Point> &dataSet, in
 
 // generates circles based on how big their radius can possible be of pure classification. then we simplify by removing useless circles.
 vector<HyperCircle> HyperCircle::generateMaxDistanceBasedHyperCircles(vector<Point> &dataSet, int numClasses) {
+
+    numCirclesPerClass.clear();
+    numCirclesPerClass.resize(numClasses);
+
     vector<HyperCircle> circles(dataSet.size());
 
     // Parallel HC creation.
@@ -268,8 +270,8 @@ vector<HyperCircle> HyperCircle::generateMaxDistanceBasedHyperCircles(vector<Poi
     }
 
     #pragma omp parallel for
-    for (auto & circle : circles) {
-        circle.findMaxDistance(dataSet);
+    for (int i = 0; i < circles.size(); ++i) {
+        circles[i].findMaxDistance(dataSet);
     }
 
     // count how many points are in each circle.
@@ -279,10 +281,10 @@ vector<HyperCircle> HyperCircle::generateMaxDistanceBasedHyperCircles(vector<Poi
         // do a reduction to efficiently compute the size of the circle in terms of point count
         // we do the reduction because we are computing a ton of euclidean distances in the inside function.
         #pragma omp parallel for reduction(+ : insideCount)
-        for (auto & point : dataSet) {
+        for (int p = 0; p < dataSet.size(); ++p) {
 
             // if this point is inside, increment numPoints
-            if (circle.insideCircle(point.location)) {
+            if (circle.insideCircle(dataSet[p].location)) {
                 insideCount++;
             }
         }
@@ -315,13 +317,14 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
 
         // take every point, and find it's biggest circle it fits inside of by radius
         #pragma omp for schedule(static)
-        for (auto p : dataSet) {
+        for (int point = 0; point < dataSet.size(); point++) {
+            auto &p = dataSet[point];
 
             // get our biggest count, track it, get our point
-            float biggestRadius = 0;
+            float biggestRadius = 0.0f;
             int bestCircleIndex = -1;
 
-            // find the best circle
+            // find the best circle for each point
             for (int circ = 0; circ < circles.size(); circ++) {
                 auto &c = circles[circ];
 
@@ -329,9 +332,8 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
                 if (c.classification != p.classification)
                     continue;
 
-
                 if (c.insideCircle(p.location) && c.radius > biggestRadius) {
-                    biggestRadius = c.numPoints;
+                    biggestRadius = c.radius;
                     bestCircleIndex = circ;
                 }
             }
@@ -347,12 +349,14 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
 
     }// end pragma
 
-    // Erase circles that had no points assigned
-    auto newEnd = remove_if(circles.begin(), circles.end(),
-        [&, i = 0](const HyperCircle &c) mutable {
-            return circlePointCounts[i++] == 0;
-        });
-    circles.erase(newEnd, circles.end());
+    // make a new list, and move in just the HC's which are able to uniquely classify training points.
+    vector<HyperCircle> filtered;
+    filtered.reserve(circles.size());
+    for (int i = 0; i < circles.size(); ++i) {
+        if (circlePointCounts[i] != 0)
+            filtered.push_back(std::move(circles[i]));
+    }
+    circles = std::move(filtered);
 }
 
 int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &train, float *dataToCheck, int classificationMode, int subMode,  int numClasses, int k = 5) {

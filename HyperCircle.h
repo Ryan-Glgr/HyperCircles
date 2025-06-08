@@ -29,9 +29,6 @@ public:
 
     float *centerPoint;
 
-    // might help us to create less circles, and more useful ones.
-    float maxPureDistance;
-
     int classification;
 
     int numPoints;
@@ -89,8 +86,6 @@ public:
     static int kNearestCircle(std::vector<HyperCircle> &circles, float *point, int k, int numClasses);
 
     static int kNearestCircleRatio(std::vector<HyperCircle> &circles, float *point, int k, int numClasses);
-
-
 
 };
 

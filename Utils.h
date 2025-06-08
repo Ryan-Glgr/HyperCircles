@@ -61,7 +61,7 @@ public:
             sum += d0*d0 + d1*d1 + d2*d2 + d3*d3;
         }
         // get the remaining values.
-        for (int i = limit + 4; i < n; ++i) {
+        for (int i = limit; i < n; ++i) {
             float d = a[i] - b[i];
             sum += d*d;
         }
