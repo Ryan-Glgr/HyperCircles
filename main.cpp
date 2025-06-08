@@ -109,7 +109,7 @@ static void saveCircles(const vector<HyperCircle>& circles, const string& filena
     out.close();
 }
 
-// loads circles from a file
+// loads circles from a file in binary
 static vector<HyperCircle> loadCircles(const string& filename) {
     ifstream in(filename, ios::binary);
     int32_t n;
@@ -136,6 +136,13 @@ static vector<HyperCircle> loadCircles(const string& filename) {
         circles.push_back(hc);
     }
     in.close();
+
+    // now we rebuild the count of circles per class.
+    HyperCircle::numCirclesPerClass.resize(NUM_CLASSES);
+    for (HyperCircle & circle : circles) {
+        HyperCircle::numCirclesPerClass[circle.classification]++;
+    }
+
     return circles;
 }
 
@@ -201,7 +208,7 @@ void findBestHCVoting (vector<HyperCircle> &circles, vector<Point> &train, vecto
 
             // if not covered by our circle, use KNN.
             if (predictedClass == -1) {
-                predictedClass = HyperCircle::classifyPoint(circles,train,point.location,HyperCircle::REGULAR_KNN,HyperCircle::PER_CLASS_VOTE, NUM_CLASSES, k);
+                predictedClass = HyperCircle::classifyPoint(circles,train,point.location,HyperCircle::REGULAR_KNN, -1, NUM_CLASSES, k);
                 unclassifiedCount++;
             }
 
@@ -384,8 +391,8 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
                 trainingData.insert(trainingData.end(), kBuckets[trainFold].begin(), kBuckets[trainFold].end());
         }
 
-        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
-
+//        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
+	vector<HyperCircle> circles = HyperCircle::generateMaxDistanceBasedHyperCircles(trainingData, NUM_CLASSES);
         // get our accuracy on the test portion.
         int k = 5;
         totalAcc += testAccuracy(circles, trainingData, testData, k);

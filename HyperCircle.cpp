@@ -438,6 +438,9 @@ int HyperCircle::classifyPoint(vector<HyperCircle> &circles, vector<Point> &trai
 
             // if we were looking for smallest circle, we can just return it from here.
             if (subMode == SMALLEST_CIRCLE) {
+                if (smallestCircle.second == -1) {
+                    return -1; // No circle contained the point
+                }
                 return circles[smallestCircle.second].classification;
             }
 
