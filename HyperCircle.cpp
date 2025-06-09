@@ -321,6 +321,7 @@ void HyperCircle::removeUselessCircles(vector<HyperCircle> &circles, vector<Poin
             auto &p = dataSet[point];
 
             // get our biggest count, track it, get our point
+            // float biggestRadius = numeric_limits<float>::max();
             float biggestRadius = 0.0f;
             int bestCircleIndex = -1;
 

@@ -14,6 +14,7 @@ using namespace std;
 // used so that we can easily get the number of classes, names and whatnot
 // very similar to github.com/austinsnyd3r/hyperblocks
 map<string, int> CLASS_MAP;
+map<int, string> REVERSED_MAP;
 int NUM_CLASSES = 0;
 int Point::numAttributes = 0;
 bool PRINTING = true;
@@ -75,9 +76,14 @@ vector<Point> readFile(const string &fileName) {
         }
 
         // Handle class label
+        // Handle class label (strip any '\r')
         string label = tokens.back();
-        if (!CLASS_MAP.contains(label)) {
-            CLASS_MAP[label] = NUM_CLASSES++;
+        if (!label.empty() && label.back() == '\r')
+            label.pop_back();
+
+        if (!CLASS_MAP.count(label)) {
+            CLASS_MAP[label]           = NUM_CLASSES;
+            REVERSED_MAP[NUM_CLASSES++] = label;
         }
         int cls = CLASS_MAP[label];
 
@@ -154,11 +160,11 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
     for (int p = 0; p < testData.size(); ++p) {
         const auto &point = testData[p];
 
-        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES, k);
+        int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES, -1);
 
         if (predictedClass == -1) {
             // re‐classify with KNN and assign to predictedClass
-            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, HyperCircle::PER_CLASS_VOTE, NUM_CLASSES, k);
+            predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, -1, NUM_CLASSES, k);
             unclassifiedCount++;
         }
 
@@ -168,15 +174,30 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
 
     if (PRINTING) {
         cout << "CONFUSION MATRIX:" << endl;
+        // print confusion matrix with class labels
         for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
+            // print the actual class label
+            cout << "Class " << REVERSED_MAP[cls] << ":\t";
             for (int row = 0; row < CLASS_MAP.size(); ++row) {
                 cout << confusionMatrix[cls][row] << "\t|| ";
             }
             cout << endl;
         }
-        cout << "UNCLASSIFIED BY THE HCs:\t" << unclassifiedCount << endl << endl;
-    }
 
+        cout << "UNCLASSIFIED BY THE HCs:\t" << unclassifiedCount << endl << endl;
+
+        // Print accuracy per class
+        cout << "CLASS-BY-CLASS ACCURACY:" << endl;
+        for (int cls = 0; cls < CLASS_MAP.size(); ++cls) {
+            int truePositive = confusionMatrix[cls][cls];
+            int totalInClass = 0;
+            for (int row = 0; row < CLASS_MAP.size(); ++row) {
+                totalInClass += confusionMatrix[cls][row];
+            }
+            float classAccuracy = (totalInClass > 0) ? (float)truePositive / (float)totalInClass : 0;
+            cout << "Class " << REVERSED_MAP[cls] << " Accuracy: " << classAccuracy * 100 << "%" << endl;
+        }
+    }
     // count how many we got right
     int totalRight = 0;
     for (int cls = 0; cls < confusionMatrix.size(); cls++) {
@@ -391,10 +412,10 @@ pair<float, float> kFoldValidation(int numFolds, vector<Point> &allData) {
                 trainingData.insert(trainingData.end(), kBuckets[trainFold].begin(), kBuckets[trainFold].end());
         }
 
-//        vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
-	vector<HyperCircle> circles = HyperCircle::generateMaxDistanceBasedHyperCircles(trainingData, NUM_CLASSES);
+        // vector<HyperCircle> circles = HyperCircle::generateHyperCircles(trainingData, NUM_CLASSES);
+    	vector<HyperCircle> circles = HyperCircle::generateMaxDistanceBasedHyperCircles(trainingData, NUM_CLASSES);
         // get our accuracy on the test portion.
-        int k = 5;
+        int k = 3;
         totalAcc += testAccuracy(circles, trainingData, testData, k);
 
         // add our count so we can track how many circles we needed.
@@ -496,7 +517,7 @@ int main() {
 
             // tests against a given test set
             case 5: {
-                int k = 5;
+                int k = 3;
                 float acc = testAccuracy(circles, trainData,testData, k);
                 cout << "Accuracy: " << acc << endl;
                 Utils::waitForEnter();
