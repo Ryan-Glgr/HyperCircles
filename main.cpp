@@ -160,8 +160,10 @@ float testAccuracy(vector<HyperCircle> &circles, vector<Point> &train, vector<Po
     for (int p = 0; p < testData.size(); ++p) {
         const auto &point = testData[p];
 
+        // predict the point using our circles
         int predictedClass = HyperCircle::classifyPoint(circles, train, point.location, HyperCircle::USE_CIRCLES, HyperCircle::SIMPLE_MAJORITY, NUM_CLASSES, -1);
 
+        // if it remains -1, send it to a fallback
         if (predictedClass == -1) {
             // re‐classify with KNN and assign to predictedClass
             predictedClass = HyperCircle::classifyPoint(circles,train, point.location,HyperCircle::REGULAR_KNN, -1, NUM_CLASSES, k);
